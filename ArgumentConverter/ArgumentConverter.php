@@ -8,7 +8,7 @@ class ArgumentConverter {
     }
 
     protected function convertString(string $arg) {
-        return "'" . $arg . "'";
+        return '\'' . $arg . '\'';
     }
 
     protected function convertIdentificator(string $arg) {

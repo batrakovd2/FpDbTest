@@ -16,60 +16,66 @@ class Database implements DatabaseInterface
     private mysqli $mysqli;
     private string $specifierRegex;
 
+    private $querySpecifiers = [];
+
     public function __construct(mysqli $mysqli)
     {
         $this->mysqli = $mysqli;
-        $this->specifierRegex = $this->getQueryRegex();
+        $this->specifierRegex = $this->findSpecifierInQueryRegex();
     }
 
     /**
+     * Конвертирование строки запроса шаблона
+     * в готовую строку запроса
      * @throws Exception
      */
     public function buildQuery(string $query, array $args = []): string
     {
 
-        $countIdentifier = preg_match_all($this->specifierRegex, $query, $querySpecifiers);
-        $querySpecifiers = !empty($querySpecifiers[0]) ? $querySpecifiers[0] : [];
+        $countSpecifierInQuery = $this->findSpecifierInQuery($query);
 
-        if(count($args) != $countIdentifier) {
-            throw new Exception();
+        if(count($args) != $countSpecifierInQuery) {
+            throw new Exception("The number of arguments does not match the number of specifiers");
         }
 
-        if(empty($querySpecifiers)) {
+        if(empty($this->querySpecifiers)) {
             return $query;
         } else {
+
             if(in_array($this->skip(), $args, true)) {
                 $query = $this->removeConditionBlocksBySpecSymbol($query, $args);
             }
-            $query = str_replace(['{', '}'], "", $query);
+
+            $query = $this->removeAllBracketsFromQuery($query);
 
             $convertedArguments = [];
-            $argumentObjects = $this->getArgumentObjects($querySpecifiers, $args);
+            $argumentObjects = $this->getArgumentConvertObjects($this->querySpecifiers, $args);
             foreach ($argumentObjects as $arOb) {
                 $convertedArguments[] = $arOb->convert();
             }
         }
 
-        foreach ($convertedArguments as $key => $convArg) {
-            $query = preg_replace("/\\" . $querySpecifiers[$key] . "/", $convArg, $query, 1);
-        }
+        $query = $this->replaceSpecifiersOnConvertedArgument($query, $convertedArguments);
 
-        $query = preg_replace("/\s+/", " ", $query);
+        $query = $this->removeAllDoubleSpaceSymbols($query);
 
         return $query;
     }
 
+    /**
+     * Спец значение для пропуска условного блока
+     */
     public function skip()
     {
         return "!";
     }
 
     /**
-     * Формируем регулярное выражение
+     * Формирование регулярного выражения
      * '/\?d|\?f|\?a|\?#|\?/iu'
      * с полученными спецификаторами
      */
-    private function getQueryRegex(): string {
+    private function findSpecifierInQueryRegex(): string {
         $specifiers = Specifier::getSpecifiers();
         $regex = '/';
         foreach($specifiers as $sp) {
@@ -83,7 +89,7 @@ class Database implements DatabaseInterface
     /**
      * Формирование массива объектов аргументов по типам спецификаторов
      */
-    private function getArgumentObjects($specifier, $args) {
+    private function getArgumentConvertObjects($specifier, $args) {
         return array_map(function($sp, $arg) {
             $sp = str_replace('?', '', $sp);
 
@@ -104,6 +110,8 @@ class Database implements DatabaseInterface
     }
 
     /**
+     * Проверка и удаление условных блоков
+     * Вывод измененной (или нет) строки запроса
      * @throws Exception
      */
     private function removeConditionBlocksBySpecSymbol(string $query, array &$args): string {
@@ -215,9 +223,46 @@ class Database implements DatabaseInterface
             $strResult .= $lastStr;
         } else {
             //ошибка, если есть спец символ среди аргументов, но нет условных блоков
-            throw new Exception();
+            throw new Exception("Missing conditional block for argument with special character");
         }
 
         return $strResult;
+    }
+
+    /**
+     * Находим спецификаторы в строке запроса
+     * присваивает найденые спецификаторы в querySpecifiers
+     * выводит количество спецификаторов в строке
+     * @param $query
+     * @return false|int
+     */
+    private function findSpecifierInQuery($query) {
+        $countSpecifierInQuery = preg_match_all($this->specifierRegex, $query, $this->querySpecifiers);
+        $this->querySpecifiers = !empty($this->querySpecifiers[0]) ? $this->querySpecifiers[0] : [];
+        return $countSpecifierInQuery;
+    }
+
+    /**
+     * Удаление фигурных скобок из строки запроса
+     */
+    private function removeAllBracketsFromQuery($query) {
+        return str_replace(['{', '}'], "", $query);
+    }
+
+    /**
+     * Замена спецификаторов на конвертированные аргументы в строке запроса
+     */
+    private function replaceSpecifiersOnConvertedArgument($query, $convertedArguments) {
+        foreach ($convertedArguments as $key => $convArg) {
+            $query = preg_replace("/\\" . $this->querySpecifiers[$key] . "/", $convArg, $query, 1);
+        }
+        return $query;
+    }
+
+    /**
+     * Удаление дублирующихся пробельных символов
+     */
+    private function removeAllDoubleSpaceSymbols($query) {
+        return preg_replace("/\s+/", " ", $query);
     }
 }
